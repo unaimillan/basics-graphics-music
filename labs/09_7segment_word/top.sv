@@ -67,6 +67,17 @@ module top
 
     //------------------------------------------------------------------------
 
+    logic [ w_key - 1:0 ] key_r, key_pressed;
+
+    always_ff @ (posedge clk or posedge rst)
+      if (rst)
+        key_r <= '0;
+      else
+        key_r <= key;
+    
+    assign key_pressed = (~ key_r) & key;
+
+
     logic [31:0] cnt;
 
     always_ff @ (posedge clk or posedge rst)
@@ -75,7 +86,19 @@ module top
         else
             cnt <= cnt + 1'd1;
 
-    wire enable = (cnt [22:0] == '0);
+    wire enable = ((cnt & enable_mask) == '0);
+
+
+    logic [ $bits(cnt) - 1 : 0 ] enable_mask;
+    always_ff @ (posedge clk or posedge rst)
+      if (rst)
+        enable_mask <= { 22 {1'b1}};
+      else begin
+        if (key_pressed[0])
+          enable_mask <= enable_mask>>1;
+        else if (key_pressed[1])
+          enable_mask <= (enable_mask << 1) | 1'b1;
+      end
 
     //------------------------------------------------------------------------
 
