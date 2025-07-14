@@ -78,6 +78,7 @@ module lab_top
 	wire [3:0]          mem_wstrb;
 	reg  [31:0]         mem_rdata;
 
+    assign mem_ready = sw[0];
 
 	picorv32 picorv (
 		.clk        ( slow_clk  ),
@@ -92,14 +93,9 @@ module lab_top
 		.mem_rdata  ( mem_rdata )
 	);
 
-    instruction_ram memory_file (
-        .clk        ( slow_clk  ),
-        .mem_valid  ( mem_valid ),
-        .mem_ready  ( mem_ready ),
+    instruction_rom i_rom (
         .mem_addr   ( mem_addr  ),
-        .mem_wstrb  ( mem_wstrb ),
         .mem_rdata  ( mem_rdata ),
-        .mem_wdata  ( mem_wdata )
     );
 
     logic [w_led-1:0] led_reg;
@@ -129,7 +125,7 @@ module lab_top
         .clk      ( clk      ),
         .rst      ( rst      ),
 
-        .number   ( ~key[0] ? (mem_addr >> 2) : mem_rdata ),
+        .number   ( key[0] ? (mem_addr >> 2) : mem_rdata ),
         .dots     ( '0       ),
 
         .abcdefgh ( abcdefgh ),
