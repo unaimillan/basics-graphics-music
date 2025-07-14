@@ -87,7 +87,7 @@ module picorv32 #(
 	parameter [31:0] PROGADDR_IRQ = 32'h 0000_0010,
 	parameter [31:0] STACKADDR = 32'h ffff_ffff
 ) (
-	input clk, resetn,
+	input clk, reset,
 	output reg trap,
 
 	output reg        mem_valid,
@@ -272,7 +272,7 @@ module picorv32 #(
 	generate if (ENABLE_FAST_MUL) begin
 		picorv32_pcpi_fast_mul pcpi_mul (
 			.clk       (clk            ),
-			.resetn    (resetn         ),
+			.reset     (reset          ),
 			.pcpi_valid(pcpi_valid     ),
 			.pcpi_insn (pcpi_insn      ),
 			.pcpi_rs1  (pcpi_rs1       ),
@@ -285,7 +285,7 @@ module picorv32 #(
 	end else if (ENABLE_MUL) begin
 		picorv32_pcpi_mul pcpi_mul (
 			.clk       (clk            ),
-			.resetn    (resetn         ),
+			.reset     (reset          ),
 			.pcpi_valid(pcpi_valid     ),
 			.pcpi_insn (pcpi_insn      ),
 			.pcpi_rs1  (pcpi_rs1       ),
@@ -305,7 +305,7 @@ module picorv32 #(
 	generate if (ENABLE_DIV) begin
 		picorv32_pcpi_div pcpi_div (
 			.clk       (clk            ),
-			.resetn    (resetn         ),
+			.reset     (reset          ),
 			.pcpi_valid(pcpi_valid     ),
 			.pcpi_insn (pcpi_insn      ),
 			.pcpi_rs1  (pcpi_rs1       ),
@@ -373,11 +373,11 @@ module picorv32 #(
 	assign mem_xfer = (mem_valid && mem_ready) || (mem_la_use_prefetched_high_word && mem_do_rinst);
 
 	wire mem_busy = |{mem_do_prefetch, mem_do_rinst, mem_do_rdata, mem_do_wdata};
-	wire mem_done = resetn && ((mem_xfer && |mem_state && (mem_do_rinst || mem_do_rdata || mem_do_wdata)) || (&mem_state && mem_do_rinst)) &&
+	wire mem_done = (~reset) && ((mem_xfer && |mem_state && (mem_do_rinst || mem_do_rdata || mem_do_wdata)) || (&mem_state && mem_do_rinst)) &&
 			(!mem_la_firstword || (~&mem_rdata_latched[1:0] && mem_xfer));
 
-	assign mem_la_write = resetn && !mem_state && mem_do_wdata;
-	assign mem_la_read = resetn && ((!mem_la_use_prefetched_high_word && !mem_state && (mem_do_rinst || mem_do_prefetch || mem_do_rdata)) ||
+	assign mem_la_write = (~reset) && !mem_state && mem_do_wdata;
+	assign mem_la_read = (~reset) && ((!mem_la_use_prefetched_high_word && !mem_state && (mem_do_rinst || mem_do_prefetch || mem_do_rdata)) ||
 			(COMPRESSED_ISA && mem_xfer && (!last_mem_valid ? mem_la_firstword : mem_la_firstword_reg) && !mem_la_secondword && &mem_rdata_latched[1:0]));
 	assign mem_la_addr = (mem_do_prefetch || mem_do_rinst) ? {next_pc[31:2] + mem_la_firstword_xfer, 2'b00} : {reg_op1[31:2], 2'b00};
 
@@ -387,8 +387,8 @@ module picorv32 #(
 			COMPRESSED_ISA && mem_la_secondword ? {mem_rdata_latched_noshuffle[15:0], mem_16bit_buffer} :
 			COMPRESSED_ISA && mem_la_firstword ? {16'bx, mem_rdata_latched_noshuffle[31:16]} : mem_rdata_latched_noshuffle;
 
-	always @(posedge clk) begin
-		if (!resetn) begin
+	always @(posedge clk or posedge reset) begin
+		if (reset) begin
 			mem_la_firstword_reg <= 0;
 			last_mem_valid <= 0;
 		end else begin
@@ -544,7 +544,7 @@ module picorv32 #(
 	end
 
 	always @(posedge clk) begin
-		if (resetn && !trap) begin
+		if ((~reset) && !trap) begin
 			if (mem_do_prefetch || mem_do_rinst || mem_do_rdata)
 				`assert(!mem_do_wdata);
 
@@ -563,10 +563,10 @@ module picorv32 #(
 	end
 
 	always @(posedge clk) begin
-		if (!resetn || trap) begin
-			if (!resetn)
+		if (reset || trap) begin
+			if (reset)
 				mem_state <= 0;
-			if (!resetn || mem_ready)
+			if (reset || mem_ready)
 				mem_valid <= 0;
 			mem_la_secondword <= 0;
 			prefetched_high_word <= 0;
@@ -784,7 +784,7 @@ module picorv32 #(
 		q_insn_rd <= dbg_insn_rd;
 		dbg_next <= launch_next_insn;
 
-		if (!resetn || trap)
+		if (reset || trap)
 			dbg_valid_insn <= 0;
 		else if (launch_next_insn)
 			dbg_valid_insn <= 1;
@@ -837,7 +837,7 @@ module picorv32 #(
 	end
 
 `ifdef DEBUGASM
-	always @(posedge clk) begin
+	always @(posedge clk or posedge reset) begin
 		if (dbg_next) begin
 			$display("debugasm %x %x %s", dbg_insn_addr, dbg_insn_opcode, dbg_ascii_instr ? dbg_ascii_instr : "*");
 		end
@@ -845,7 +845,7 @@ module picorv32 #(
 `endif
 
 `ifdef DEBUG
-	always @(posedge clk) begin
+	always @(posedge clk or posedge reset) begin
 		if (dbg_next) begin
 			if (&dbg_insn_opcode[1:0])
 				$display("DECODE: 0x%08x 0x%08x %-0s", dbg_insn_addr, dbg_insn_opcode, dbg_ascii_instr ? dbg_ascii_instr : "UNKNOWN");
@@ -1133,7 +1133,7 @@ module picorv32 #(
 			endcase
 		end
 
-		if (!resetn) begin
+		if (reset) begin
 			is_beq_bne_blt_bge_bltu_bgeu <= 0;
 			is_compare <= 0;
 
@@ -1227,7 +1227,7 @@ module picorv32 #(
 	reg alu_eq, alu_ltu, alu_lts;
 
 	generate if (TWO_CYCLE_ALU) begin
-		always @(posedge clk) begin
+		always @(posedge clk or posedge reset) begin
 			alu_add_sub <= instr_sub ? reg_op1 - reg_op2 : reg_op1 + reg_op2;
 			alu_eq <= reg_op1 == reg_op2;
 			alu_lts <= $signed(reg_op1) < $signed(reg_op2);
@@ -1290,13 +1290,13 @@ module picorv32 #(
 	end
 
 	reg clear_prefetched_high_word_q;
-	always @(posedge clk) clear_prefetched_high_word_q <= clear_prefetched_high_word;
+	always @(posedge clk or posedge reset) clear_prefetched_high_word_q <= clear_prefetched_high_word;
 
 	always @* begin
 		clear_prefetched_high_word = clear_prefetched_high_word_q;
 		if (!prefetched_high_word)
 			clear_prefetched_high_word = 0;
-		if (latched_branch || irq_state || !resetn)
+		if (latched_branch || irq_state || reset)
 			clear_prefetched_high_word = COMPRESSED_ISA;
 	end
 
@@ -1335,7 +1335,7 @@ module picorv32 #(
 
 `ifndef PICORV32_REGS
 	always @(posedge clk) begin
-		if (resetn && cpuregs_write && latched_rd)
+		if ((~reset) && cpuregs_write && latched_rd)
 `ifdef PICORV32_TESTBUG_001
 			cpuregs[latched_rd ^ 1] <= cpuregs_wrdata;
 `elsif PICORV32_TESTBUG_002
@@ -1375,7 +1375,7 @@ module picorv32 #(
 
 	`PICORV32_REGS cpuregs (
 		.clk(clk),
-		.wen(resetn && cpuregs_write && latched_rd),
+		.wen((~reset) && cpuregs_write && latched_rd),
 		.waddr(cpuregs_waddr),
 		.raddr1(cpuregs_raddr1),
 		.raddr2(cpuregs_raddr2),
@@ -1421,7 +1421,7 @@ module picorv32 #(
 		end
 
 		if (WITH_PCPI && CATCH_ILLINSN) begin
-			if (resetn && pcpi_valid && !pcpi_int_wait) begin
+			if ((~reset) && pcpi_valid && !pcpi_int_wait) begin
 				if (pcpi_timeout_counter)
 					pcpi_timeout_counter <= pcpi_timeout_counter - 1;
 			end else
@@ -1430,7 +1430,7 @@ module picorv32 #(
 		end
 
 		if (ENABLE_COUNTERS) begin
-			count_cycle <= resetn ? count_cycle + 1 : 0;
+			count_cycle <= (~reset) ? count_cycle + 1 : 0;
 			if (!ENABLE_COUNTERS64) count_cycle[63:32] <= 0;
 		end else begin
 			count_cycle <= 'bx;
@@ -1454,7 +1454,7 @@ module picorv32 #(
 		if (!ENABLE_TRACE)
 			trace_data <= 'bx;
 
-		if (!resetn) begin
+		if (reset) begin
 			reg_pc <= PROGADDR_RESET;
 			reg_next_pc <= PROGADDR_RESET;
 			if (ENABLE_COUNTERS)
@@ -1919,7 +1919,7 @@ module picorv32 #(
 					next_irq_pending[irq_timer] = 1;
 		end
 
-		if (CATCH_MISALIGN && resetn && (mem_do_rdata || mem_do_wdata)) begin
+		if (CATCH_MISALIGN && (~reset) && (mem_do_rdata || mem_do_wdata)) begin
 			if (mem_wordsize == 0 && reg_op1[1:0] != 0) begin
 				`debug($display("MISALIGNED WORD: 0x%08x", reg_op1);)
 				if (ENABLE_IRQ && !irq_mask[irq_buserror] && !irq_active) begin
@@ -1935,7 +1935,7 @@ module picorv32 #(
 					cpu_state <= cpu_state_trap;
 			end
 		end
-		if (CATCH_MISALIGN && resetn && mem_do_rinst && (COMPRESSED_ISA ? reg_pc[0] : |reg_pc[1:0])) begin
+		if (CATCH_MISALIGN && (~reset) && mem_do_rinst && (COMPRESSED_ISA ? reg_pc[0] : |reg_pc[1:0])) begin
 			`debug($display("MISALIGNED INSTRUCTION: 0x%08x", reg_pc);)
 			if (ENABLE_IRQ && !irq_mask[irq_buserror] && !irq_active) begin
 				next_irq_pending[irq_buserror] = 1;
@@ -1946,7 +1946,7 @@ module picorv32 #(
 			cpu_state <= cpu_state_trap;
 		end
 
-		if (!resetn || mem_done) begin
+		if (reset || mem_done) begin
 			mem_do_prefetch <= 0;
 			mem_do_rinst <= 0;
 			mem_do_rdata <= 0;
@@ -1978,9 +1978,9 @@ module picorv32 #(
 	reg dbg_irq_call;
 	reg dbg_irq_enter;
 	reg [31:0] dbg_irq_ret;
-	always @(posedge clk) begin
-		rvfi_valid <= resetn && (launch_next_insn || trap) && dbg_valid_insn;
-		rvfi_order <= resetn ? rvfi_order + rvfi_valid : 0;
+	always @(posedge clk or posedge reset) begin
+		rvfi_valid <= (~reset) && (launch_next_insn || trap) && dbg_valid_insn;
+		rvfi_order <= (~reset) ? rvfi_order + rvfi_valid : 0;
 
 		rvfi_insn <= dbg_insn_opcode;
 		rvfi_rs1_addr <= dbg_rs1val_valid ? dbg_insn_rs1 : 0;
@@ -1994,7 +1994,7 @@ module picorv32 #(
 		rvfi_mode <= 3;
 		rvfi_ixl <= 1;
 
-		if (!resetn) begin
+		if (reset) begin
 			dbg_irq_call <= 0;
 			dbg_irq_enter <= 0;
 		end else
@@ -2007,7 +2007,7 @@ module picorv32 #(
 			dbg_irq_ret <= next_pc;
 		end
 
-		if (!resetn) begin
+		if (reset) begin
 			rvfi_rd_addr <= 0;
 			rvfi_rd_wdata <= 0;
 		end else
@@ -2102,21 +2102,21 @@ module picorv32 #(
 	// Formal Verification
 `ifdef FORMAL
 	reg [3:0] last_mem_nowait;
-	always @(posedge clk)
+	always @(posedge clk or posedge reset)
 		last_mem_nowait <= {last_mem_nowait, mem_ready || !mem_valid};
 
 	// stall the memory interface for max 4 cycles
 	restrict property (|last_mem_nowait || mem_ready || !mem_valid);
 
 	// resetn low in first cycle, after that resetn high
-	restrict property (resetn != $initstate);
+	restrict property ((~reset) != $initstate);
 
 	// this just makes it much easier to read traces. uncomment as needed.
 	// assume property (mem_valid || !mem_ready);
 
 	reg ok;
 	always @* begin
-		if (resetn) begin
+		if ((~reset)) begin
 			// instruction fetches are read-only
 			if (mem_valid && mem_instr)
 				assert (mem_wstrb == 0);
@@ -2141,7 +2141,7 @@ module picorv32 #(
 	reg [31:0] last_mem_la_wdata;
 	reg [3:0] last_mem_la_wstrb = 0;
 
-	always @(posedge clk) begin
+	always @(posedge clk or posedge reset) begin
 		last_mem_la_read <= mem_la_read;
 		last_mem_la_write <= mem_la_write;
 		last_mem_la_addr <= mem_la_addr;
@@ -2198,7 +2198,7 @@ module picorv32_pcpi_mul #(
 	parameter STEPS_AT_ONCE = 1,
 	parameter CARRY_CHAIN = 4
 ) (
-	input clk, resetn,
+	input clk, reset,
 
 	input             pcpi_valid,
 	input      [31:0] pcpi_insn,
@@ -2218,13 +2218,13 @@ module picorv32_pcpi_mul #(
 	reg pcpi_wait_q;
 	wire mul_start = pcpi_wait && !pcpi_wait_q;
 
-	always @(posedge clk) begin
+	always @(posedge clk or posedge reset) begin
 		instr_mul <= 0;
 		instr_mulh <= 0;
 		instr_mulhsu <= 0;
 		instr_mulhu <= 0;
 
-		if (resetn && pcpi_valid && pcpi_insn[6:0] == 7'b0110011 && pcpi_insn[31:25] == 7'b0000001) begin
+		if ((~reset) && pcpi_valid && pcpi_insn[6:0] == 7'b0110011 && pcpi_insn[31:25] == 7'b0000001) begin
 			case (pcpi_insn[14:12])
 				3'b000: instr_mul <= 1;
 				3'b001: instr_mulh <= 1;
@@ -2270,9 +2270,9 @@ module picorv32_pcpi_mul #(
 		end
 	end
 
-	always @(posedge clk) begin
+	always @(posedge clk or posedge reset) begin
 		mul_finish <= 0;
-		if (!resetn) begin
+		if (reset) begin
 			mul_waiting <= 1;
 		end else
 		if (mul_waiting) begin
@@ -2304,10 +2304,10 @@ module picorv32_pcpi_mul #(
 		end
 	end
 
-	always @(posedge clk) begin
+	always @(posedge clk or posedge reset) begin
 		pcpi_wr <= 0;
 		pcpi_ready <= 0;
-		if (mul_finish && resetn) begin
+		if (mul_finish && (~reset)) begin
 			pcpi_wr <= 1;
 			pcpi_ready <= 1;
 			pcpi_rd <= instr_any_mulh ? rd >> 32 : rd;
@@ -2320,7 +2320,7 @@ module picorv32_pcpi_fast_mul #(
 	parameter EXTRA_INSN_FFS = 0,
 	parameter MUL_CLKGATE = 0
 ) (
-	input clk, resetn,
+	input clk, reset,
 
 	input             pcpi_valid,
 	input      [31:0] pcpi_insn,
@@ -2351,7 +2351,7 @@ module picorv32_pcpi_fast_mul #(
 		instr_mulhsu = 0;
 		instr_mulhu = 0;
 
-		if (resetn && (EXTRA_INSN_FFS ? pcpi_insn_valid_q : pcpi_insn_valid)) begin
+		if ((~reset) && (EXTRA_INSN_FFS ? pcpi_insn_valid_q : pcpi_insn_valid)) begin
 			case (pcpi_insn[14:12])
 				3'b000: instr_mul = 1;
 				3'b001: instr_mulh = 1;
@@ -2361,7 +2361,7 @@ module picorv32_pcpi_fast_mul #(
 		end
 	end
 
-	always @(posedge clk) begin
+	always @(posedge clk or posedge reset) begin
 		pcpi_insn_valid_q <= pcpi_insn_valid;
 		if (!MUL_CLKGATE || active[0]) begin
 			rs1_q <= rs1;
@@ -2375,7 +2375,7 @@ module picorv32_pcpi_fast_mul #(
 		end
 	end
 
-	always @(posedge clk) begin
+	always @(posedge clk or posedge reset) begin
 		if (instr_any_mul && !(EXTRA_MUL_FFS ? active[3:0] : active[1:0])) begin
 			if (instr_rs1_signed)
 				rs1 <= $signed(pcpi_rs1);
@@ -2394,7 +2394,7 @@ module picorv32_pcpi_fast_mul #(
 		active[3:1] <= active;
 		shift_out <= instr_any_mulh;
 
-		if (!resetn)
+		if (reset)
 			active <= 0;
 	end
 
@@ -2418,7 +2418,7 @@ endmodule
  ***************************************************************/
 
 module picorv32_pcpi_div (
-	input clk, resetn,
+	input clk, reset,
 
 	input             pcpi_valid,
 	input      [31:0] pcpi_insn,
@@ -2435,13 +2435,13 @@ module picorv32_pcpi_div (
 	reg pcpi_wait_q;
 	wire start = pcpi_wait && !pcpi_wait_q;
 
-	always @(posedge clk) begin
+	always @(posedge clk or posedge reset) begin
 		instr_div <= 0;
 		instr_divu <= 0;
 		instr_rem <= 0;
 		instr_remu <= 0;
 
-		if (resetn && pcpi_valid && !pcpi_ready && pcpi_insn[6:0] == 7'b0110011 && pcpi_insn[31:25] == 7'b0000001) begin
+		if ((~reset) && pcpi_valid && !pcpi_ready && pcpi_insn[6:0] == 7'b0110011 && pcpi_insn[31:25] == 7'b0000001) begin
 			case (pcpi_insn[14:12])
 				3'b100: instr_div <= 1;
 				3'b101: instr_divu <= 1;
@@ -2450,8 +2450,8 @@ module picorv32_pcpi_div (
 			endcase
 		end
 
-		pcpi_wait <= instr_any_div_rem && resetn;
-		pcpi_wait_q <= pcpi_wait && resetn;
+		pcpi_wait <= instr_any_div_rem && (~reset);
+		pcpi_wait_q <= pcpi_wait && (~reset);
 	end
 
 	reg [31:0] dividend;
@@ -2461,12 +2461,12 @@ module picorv32_pcpi_div (
 	reg running;
 	reg outsign;
 
-	always @(posedge clk) begin
+	always @(posedge clk or posedge reset) begin
 		pcpi_ready <= 0;
 		pcpi_wr <= 0;
 		pcpi_rd <= 'bx;
 
-		if (!resetn) begin
+		if (reset) begin
 			running <= 0;
 		end else
 		if (start) begin
@@ -2541,7 +2541,7 @@ module picorv32_axi #(
 	parameter [31:0] PROGADDR_IRQ = 32'h 0000_0010,
 	parameter [31:0] STACKADDR = 32'h ffff_ffff
 ) (
-	input clk, resetn,
+	input clk, reset,
 	output trap,
 
 	// AXI4-lite master memory interface
@@ -2618,7 +2618,7 @@ module picorv32_axi #(
 
 	picorv32_axi_adapter axi_adapter (
 		.clk            (clk            ),
-		.resetn         (resetn         ),
+		.reset          (reset          ),
 		.mem_axi_awvalid(mem_axi_awvalid),
 		.mem_axi_awready(mem_axi_awready),
 		.mem_axi_awaddr (mem_axi_awaddr ),
@@ -2673,7 +2673,7 @@ module picorv32_axi #(
 		.STACKADDR           (STACKADDR           )
 	) picorv32_core (
 		.clk      (clk   ),
-		.resetn   (resetn),
+		.reset    (reset ),
 		.trap     (trap  ),
 
 		.mem_valid(mem_valid),
@@ -2729,7 +2729,7 @@ endmodule
  ***************************************************************/
 
 module picorv32_axi_adapter (
-	input clk, resetn,
+	input clk, reset,
 
 	// AXI4-lite master memory interface
 
@@ -2787,8 +2787,8 @@ module picorv32_axi_adapter (
 	assign mem_axi_rready = mem_valid && !mem_wstrb;
 	assign mem_rdata = mem_axi_rdata;
 
-	always @(posedge clk) begin
-		if (!resetn) begin
+	always @(posedge clk or posedge reset) begin
+		if (reset) begin
 			ack_awvalid <= 0;
 		end else begin
 			xfer_done <= mem_valid && mem_ready;
@@ -2904,10 +2904,10 @@ module picorv32_wb #(
 	reg [31:0] mem_rdata;
 
 	wire clk;
-	wire resetn;
+	wire reset;
 
 	assign clk = wb_clk_i;
-	assign resetn = ~wb_rst_i;
+	assign reset = ~wb_rst_i;
 
 	picorv32 #(
 		.ENABLE_COUNTERS     (ENABLE_COUNTERS     ),
@@ -2937,7 +2937,7 @@ module picorv32_wb #(
 		.STACKADDR           (STACKADDR           )
 	) picorv32_core (
 		.clk      (clk   ),
-		.resetn   (resetn),
+		.reset    (reset ),
 		.trap     (trap  ),
 
 		.mem_valid(mem_valid),
