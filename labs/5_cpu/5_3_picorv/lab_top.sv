@@ -95,7 +95,7 @@ module lab_top
 
     instruction_rom i_rom (
         .mem_addr   ( mem_addr  ),
-        .mem_rdata  ( mem_rdata ),
+        .mem_rdata  ( mem_rdata )
     );
 
     logic [w_led-1:0] led_reg;
